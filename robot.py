@@ -26,11 +26,12 @@ class Robot():
 
         #try-except block to hopefully catch any connection errors
         try:
+            print("attempting to connect to ugot at:")
             self.ugot.initialize(ip)
         except:
-            raise exceptions.InvalidUgotIP(f"Failed to connect to UGOT at IP {ip}.\nPlease check the connection and IP shown on the bot.")
+            raise exceptions.InvalidUgotIP(f"Failed to connect to UGOT at IP {ip}.\nPlease check the WiFi connection and IP shown on the bot.")
         
-        print("ugot connected succesfully!")
+        print("\nugot connected succesfully!")
         self.ugot.load_models(
             ["color_recognition", "word_recognition", "line_recognition", "apriltag_qrcode"]
         )
@@ -43,16 +44,24 @@ class Robot():
         if frame is None:
             return None
 
+        # 1. Decode to BGR (OpenCV Default)
         nparr = np.frombuffer(frame, dtype=np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        if img is None:
+        img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img_bgr is None:
             return None
 
-        # Fast BGR → RGB + transpose
-        frame_rgb = np.transpose(img[:, :, ::-1], (1, 0, 2))
+        # 2. Prepare HSV for Detection Queue
+        img_hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+        if not self.channels.hsv_camera_frame_queue.full():
+            self.channels.hsv_camera_frame_queue.put(img_hsv)
 
-        if not (self.channels.camera_frame_queue.full()):
-            self.channels.camera_frame_queue.put(frame_rgb)
+        # 3. Prepare RGB for Pygame Queue
+        # We do the transpose here if Pygame needs (width, height) orientation
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        img_pygame = np.transpose(img_rgb, (1, 0, 2)) 
+
+        if not self.channels.camera_frame_queue.full():
+            self.channels.camera_frame_queue.put(img_pygame)
 
     def mainloop(self):
         while True:

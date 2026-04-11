@@ -44,9 +44,9 @@ import exceptions,robot,gui,process_manager
 
 if __name__ == "__main__":
     print(f"""
-loading done! ({((datetime.now()-a).total_seconds())}s)
+    module loading finished! ({((datetime.now()-a).total_seconds())}s)
 
-creating Manager instance and executing mainloops...""")
+    creating Manager instance and executing mainloops...\n""")
 
     manager = process_manager.Manager(ip="192.168.100.195")
     manager.mainloop()
