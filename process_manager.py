@@ -23,16 +23,8 @@ from queue import Queue
 import json
 
 #other modules
-import robot,exceptions,gui,timer
-
-class QueueChannels:
-    def __init__(self):
-        self.camera_frame_queue = Queue(1)
-        self.hsv_camera_frame_queue = Queue(1)
-        self.webcam_frame_queue = Queue(1)
-        
-        self.timer_value = datetime.fromtimestamp(0)-datetime.fromtimestamp(0)
-        self.timer_running = False
+import robot,gui,timer
+from definitions import *
 
 class Manager:
 
@@ -45,13 +37,13 @@ class Manager:
         if self.config["enable_gui"] == True:
             self.gui = gui.GUI(self.channels,resolution)
 
-        #self.robot = robot.Robot(self.channels,ip)   
+        self.robot = robot.Robot(self.channels,ip)   
         self.timer = timer.Timer(self.channels)
         
 
     def mainloop(self):        
-        #self.robot_thread = threading.Thread(target=self.robot.mainloop)
-        #self.robot_thread.start()
+        self.robot_thread = threading.Thread(target=self.robot.mainloop)
+        self.robot_thread.start()
 
         self.timer_thread = threading.Thread(target=self.timer.mainloop)
         self.timer_thread.start()

@@ -37,8 +37,8 @@ from pose_yolo import run_pose_control_inline
 import threading
 
 #import definition files
-import exceptions,robot,gui,process_manager
-
+import robot,gui,process_manager
+from definitions import *
 #notify user now!
 
 
