@@ -20,32 +20,35 @@ import threading
 from definitions import *
 
 class Robot():
-    def __init__(self,channels,ip='192.168.88.1'):
+    def __init__(self,channels,ip='192.168.88.1',config={}):
         self.channels = channels
-        #self.ugot = ugot.UGOT()
+        self.robot = ugot.UGOT()
+        self.config = config
 
         #try-except block to hopefully catch any connection errors
         try:
-            print("attempting to connect to ugot at:")
-            #self.ugot.initialize(ip)
+            print("attempting to connect to robot at:")
+            self.robot.initialize(ip)
         except:
-            raise exceptions.InvalidUgotIP(f"Failed to connect to UGOT at IP {ip}.\nPlease check the WiFi connection and IP shown on the bot.")
+            raise InvalidUGOTIP(f"Failed to connect to robot at IP {ip}.\nPlease check the WiFi connection and IP shown on the bot.")
         
-        print("\nugot connected succesfully!")
-        #self.ugot.load_models(
-        #    ["color_recognition", "word_recognition", "line_recognition", "apriltag_qrcode"]
-        #)
-        #self.ugot.open_camera()
-        #self.ugot.set_track_recognition_line(0)
-        #self.ugot.screen_display_background(0)
+        print("\nrobot connected succesfully!")
+        self.robot.load_models(
+            ["color_recognition", "word_recognition", "line_recognition", "apriltag_qrcode"]
+        )
+        self.robot.open_camera()
+        self.robot.set_track_recognition_line(0)
+        self.robot.screen_display_background(0)
 
         #multithread the camera updates always, always, always
-        #self.camera_thread = threading.Thread(self.update_camera_frame)
-        #self.camera_thread.start()
+        self.camera_thread = threading.Thread(target=self.update_camera_frame)
+        self.camera_thread.start()
+
+        self.robot.mechanical_joint_control(0,0,0,1000)
 
     def update_camera_frame(self):
         while True:
-            frame = self.ugot.read_camera_data()
+            frame = self.robot.read_camera_data()
             if frame is None:
                 return None
 
@@ -67,22 +70,334 @@ class Robot():
 
             if not self.channels.camera_frame_queue.full():
                 self.channels.camera_frame_queue.put(img_pygame)
+    
+    def colourdetect(self):
+        """Perform colour detection on the latest HSV frame.
+        Returns: detection_result dict or None if no colour detected."""
+        # Get the latest HSV frame (non-blocking)
+        try:
+            frame = self.channels.hsv_camera_frame_queue.get(block=False)
+        except:
+            return None
+        
+        if frame is None or frame.size == 0:
+            return None
+        
+        # Find the most dominant color using histogram on H channel (efficient)
+        h_channel = frame[:, :, 0]
+        hist = cv2.calcHist([h_channel], [0], None, [180], [0, 180])
+        most_common_hue = int(np.argmax(hist))
+        
+        # Create mask for colors near this hue
+        lower = np.array([max(0, most_common_hue - 15), 30, 30])
+        upper = np.array([min(180, most_common_hue + 15), 255, 255])
+        mask = cv2.inRange(frame, lower, upper)
+        
+        # Remove noise with morphological operations
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+        
+        # Find contours
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if contours:
+            # Find the largest contour (most prominent)
+            largest_contour = max(contours, key=cv2.contourArea)
+            x, y, w, h_box = cv2.boundingRect(largest_contour)
+            
+            # Calculate mean color within bounding box
+            roi = frame[y:y+h_box, x:x+w]
+            mean_hsv = cv2.mean(roi)[:3]
+            
+            detection_result = {
+                'hue': int(mean_hsv[0]),
+                'sat': int(mean_hsv[1]),
+                'val': int(mean_hsv[2]),
+                'x': int(x),
+                'y': int(y),
+                'width': int(w),
+                'height': int(h_box),
+                'area': int(cv2.contourArea(largest_contour))
+            }
+            
+            if not self.channels.color_detection_queue.full():
+                self.channels.color_detection_queue.put(detection_result)
+            
+            return detection_result
+        
+        return None
+    
+    def apriltagcentre(self, distance=0.15, gap=20, fwd_spd=10, strafe_spd=10, timeout=10):
+        """
+        Drive toward a detected AprilTag, keeping it centered in the camera frame.
+
+        Parameters:
+            distance  (float): Stop when the tag is within this many meters (default 0.15 m).
+            gap       (int):   Pixel tolerance around center (320 px) before strafing (default 20 px).
+            fwd_spd   (int):   Forward drive speed percentage (default 10 cm/s).
+            strafe_spd(int):   Left/right correction speed percentage (default 10 cm/s).
+            timeout   (int):   Maximum seconds to search for tag (default 10s).
+        """
+
+        # Refresh tag data every iteration for responsive corrections.
+        while True:
+            AP_info = self.robot.get_apriltag_total_info()
+            try:
+                AP_x = AP_info[0][1]
+                AP_distance = AP_info[0][6]
+                tag_found = True
+            except (IndexError, TypeError):
+                print("no tag detected")
+                time.sleep(0.1)
+                continue
+
+            if AP_x < 320 - gap:
+                # Tag is to the LEFT of center — strafe left to re-align.
+                # mecanum_move_xyz(x, y, z): x=strafe, y=forward, z=rotation
+                self.robot.mecanum_move_xyz(-strafe_spd, strafe_spd, 0)
+            elif AP_x > 320 + gap:
+                # Tag is to the RIGHT of center — strafe right to re-align.
+                self.robot.mecanum_move_xyz(strafe_spd, strafe_spd, 0)
+            elif AP_distance > distance:
+                # Tag is centered but still too far — drive straight forward.
+                self.robot.mecanum_move_xyz(0, fwd_spd, 0)
+            else:
+                # Tag is centered AND within target distance — stop and exit.
+                self.robot.mecanum_stop()
+                print("It's too close, let's stop.")
+                break
+        
+        time.sleep(0.05)
+    
+    def pick_up(self):
+        """Pick up an object using the arm based on the AprilTag position."""
+        # Read the tag's current position and distance for arm targeting.
+        AP_info = self.robot.get_apriltag_total_info()
+        AP_x = AP_info[0][1]
+        AP_distance = AP_info[0][6]
+
+        # Move arm to a neutral ready position and open the gripper.
+        # joint_control(j1, j2, j3, duration_ms): j2=30, j3=30 tilts arm slightly forward.
+        self.robot.mechanical_joint_control(0, 30, 30, 1000)
+        self.robot.mechanical_clamp_release() # Open gripper before extending arm
+        time.sleep(2) # Wait for gripper to fully open
+
+        # Calculate arm joint angles based on the tag's camera position.
+        # joint1 (base): convert pixel offset from center to degrees.
+        #   Negative factor corrects for the camera being mirrored horizontally.
+        joint1 = int((AP_x - 320) * -1 / 10)
+
+        # joint3 (furthest): convert distance (m) to an extension angle.
+        # The -80 offset accounts for the arm's resting angle calibration.
+        joint3 = int(AP_distance * 100 - 80)
+
+        # Move arm to the computed pick-up pose.
+        self.robot.mechanical_joint_control(joint1, 0, joint3, 500)
+        print(f"Joint1 value is: {joint1}, Joint3 value is: {joint3}.")
+        time.sleep(1) # Wait for arm to reach the target pose
+
+        # Grasp the object and lift the arm back to the carry position.
+        self.robot.mechanical_clamp_close()
+        time.sleep(2)  # Wait for gripper to fully close before lifting
+        self.robot.mechanical_joint_control(0, 30, 30, 1000)  # Return arm to neutral carry pose
+    
     def phase1(self):
         print("[robot] PHASE 1")
-        time.sleep(2)
+        
+        while True:
+            if not self.channels.timer_running:
+                self.robot.mecanum_stop()
+                return
+                
+            #search for green
+            detection = self.robot.get_color_total_info()[0]
+            
+            if detection:
+                # Red: hue < 20 or hue > 160
+                if detection == "Red":
+                    self.robot.screen_display_background(3)
+                    print("red")
+                    
+                # Green: hue 40-80
+                elif detection == "Green":
+                    self.robot.screen_display_background(6)
+                    print("green")
+                    break
+            
+            time.sleep(0.5)
+        
+        print("green detected moving on")
+        time.sleep(1)
+
+        #self.apriltagcentre()
+        #self.pick_up()
+        time.sleep(1)
+
     def phase2(self):
         print("[robot] PHASE 2")
-        time.sleep(2)
+        
+        #REMEMBER TO TUNE THESE
+        BRANCH_ANGLE = 45
+        #DONE
+
+
+        line_mult=0.25
+        line_speed=50
+        offset=0
+        line_type=0
+        text = "I_DONT_KNOWWWWWW"
+        DUMB_SECONDS = 0
+        while True:
+            if not self.channels.timer_running:
+                self.robot.mecanum_stop()
+                return
+                
+            print(f"Phase 2 following line", offset, line_type)
+            offset, line_type, _, _ = self.robot.get_single_track_total_info()
+            rotation_speed = int(offset * line_mult)
+            self.robot.mecanum_move_xyz(x_speed=0, y_speed=line_speed, z_speed=rotation_speed)
+            if line_type == 0:
+                print("NO LINE!!!!!!!!!!!")
+                self.robot.mecanum_move_speed_times(1, 30, 1, 0)
+            elif line_type == 2:
+                print("INTERSECTION!!!!!!!!!!!!!")
+                break
+
+        while True:
+            if not self.channels.timer_running:
+                self.robot.mecanum_stop()
+                return
+                
+            self.robot.mecanum_stop()
+            print("Detecting Sign, text is:", text)
+            text = self.robot.get_words_result()            
+            if text == "LEFT":
+                print("LEFT FOUND")
+                self.robot.mecanum_move_speed_times(0,30,5,1)
+                self.robot.mecanum_turn_speed_times(turn=2, speed=50, times= BRANCH_ANGLE, unit = 2)
+                self.robot.mecanum_move_speed_times(1, 30, DUMB_SECONDS, 0)
+                break
+            elif text == "RIGHT":
+                print("RIGHT FOUND")
+                self.robot.mecanum_move_speed_times(0,30,5,1)
+                self.robot.mecanum_turn_speed_times(turn=3, speed=50, times= BRANCH_ANGLE, unit=2)
+                self.robot.mecanum_move_speed_times(1, 30, DUMB_SECONDS, 0)            
+                break    
+
+        loop_count = 0
+
+        while True:
+            if not self.channels.timer_running:
+                self.robot.mecanum_stop()
+                return
+                
+            print(f"Phase 2.5 following line", offset, line_type)
+            offset, line_type, _, _ = self.robot.get_single_track_total_info()
+            rotation_speed = int(offset * line_mult)
+            self.robot.mecanum_move_xyz(x_speed=0, y_speed=line_speed, z_speed=rotation_speed)
+            if line_type == 0:
+                print("NO LINE!!!!!!!!!!!")
+                self.robot.mecanum_move_speed_times(0, 10, 1, 0)
+            elif line_type == 2 and loop_count > 30:
+                print("INTERSECTION!!!!!!!!!!!!!")
+                break
+            loop_count += 1
+
+
     def posedrive3(self):
         print("[robot] PHASE 3 DRIVE")
-        time.sleep(2)
+        self.robot.mecanum_stop()
+
+
+        
     def phase3(self):
-        print("[robot] PHASE 3")
-        time.sleep(2)
+        print("[robot] PHASE 3, FACE RECOGNITION")
+
+        #REMEMBER MEEEEE
+        TARGET_NAME = "Ryan"
+        gap = 10        
+        #DONE
+        target_name = TARGET_NAME
+        turn_spd = 15
+        strafe_spd = 25
+        fwd_spd = 10
+        height = 80
+        adjust_turn = 15
+        face_name = None
+
+        print("p3p1")
+
+        while True:
+            if not self.channels.timer_running:
+                self.robot.mecanum_stop()
+                return
+                
+            print(name, face_name)
+            self.robot.mecanum_turn_speed(turn=3, speed=turn_spd)
+
+            name = self.robot.get_words_result()
+
+
+            # Check for any recognized faces in the frame
+            faces = self.robot.get_face_recognition_total_info()
+            if faces:
+                face_name = faces[0][0]  # We need to calibrate all the face first
+
+
+            if name == target_name or face_name == target_name:
+                self.robot.mecanum_stop()
+                print(f"Saw {target_name}!")
+
+                # Small corrective turn to center the robot on the target
+                self.robot.mecanum_turn_speed_times(turn=3, speed=20, times=adjust_turn, unit=2)
+                break  
+
+        print("p3p2")
+        while True:
+            if not self.channels.timer_running:
+                self.robot.mecanum_stop()
+                return
+                
+            name = self.robot.get_words_result()
+            faces = self.robot.get_face_recognition_total_info()
+
+            if not faces:
+                # Lost the face; inch forward slowly to try to find it again
+                self.robot.mecanum_translate_speed(angle=0, speed=fwd_spd)
+            else:
+                c_x = faces[0][1]  # Horizontal center of the face in the frame (0–640 px)
+                h = faces[0][3]  # Height of the face bounding box (proxy for distance)
+                if h < height:
+                    if c_x < 320 - gap:
+                        # Face is too far LEFT — strafe left while moving forward
+                        self.robot.mecanum_move_xyz(
+                            x_speed=-strafe_spd, y_speed=fwd_spd, z_speed=0
+                        )
+                    elif c_x > 320 + gap:
+                        # Face is too far RIGHT — strafe right while moving forward
+                        self.robot.mecanum_move_xyz(x_speed=strafe_spd, y_speed=fwd_spd, z_speed=0)
+                    else:
+                        # Face is centered but still small (far away) — move straight forward
+                        self.robot.mecanum_move_xyz(x_speed=0, y_speed=fwd_spd, z_speed=0)
+                else:
+                   # Face is centered AND large enough — we've arrived!
+                   self.robot.mecanum_stop()
+                   print(f"Reached {target_name}!")
+                   break  # Done
+
+        clear_output(wait=True)
+        self.robot.mecanum_stop()
+        self.robot.mechanical_clamp_release
+ 
 
     
     def mainloop(self):
         while True:
+            if self.channels.phase == 0:
+                self.robot.mecanum_stop()
+
+            if self.channels.phase == 0 and self.channels.timer_running:
+                self.channels.phase = 1
             if self.channels.phase == 1:
                 self.phase1()
                 self.channels.phase = 2
@@ -92,7 +407,7 @@ class Robot():
             elif self.channels.phase == 3:
                 self.posedrive3()
                 self.channels.phase = 4
-            elif self.channels.phase == 4:
+            #elif self.channels.phase == 4:
                 self.phase3()
                 self.channels.phase = 0
             time.sleep(0.01)  # Prevent CPU spinning

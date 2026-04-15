@@ -116,12 +116,19 @@ class GUI():
                 if event.type == pygame.QUIT:
                     running = False
                 elif event.type == pygame.MOUSEBUTTONDOWN:
-                    self.channels.timer_running=True
+                    if self.channels.timer_running:
+                        # Stop the timer and robot
+                        self.channels.timer_running = False
+                        self.channels.phase = 0
+                    else:
+                        # Start the timer
+                        self.channels.timer_running = True
                 
             
             self.convert_bot_camera_frame()  # Update cached frame if new one available
             self.convert_webcam_frame()      # Update webcam frame if new one available
             
+            self.screen.fill((0, 0, 0))  # Clear screen before drawing new frame
             self.screen.blit(self.botcamframe, (0, 0))
             self.screen.blit(self.webcamframe,(640,0))
             pygame.draw.line(self.screen,(255,255,255),(0,1),(1280,1),width=4)
@@ -133,6 +140,7 @@ class GUI():
                     self.screen.blit(self.phase_images_red[x],(496,480+(x*48)))
                 else:
                     self.screen.blit(self.phase_images[x],(496,480+(x*48)))
+            
             
             timer_value = self.channels.timer_value
             total_seconds = timer_value.total_seconds()

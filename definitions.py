@@ -26,11 +26,12 @@ class QueueChannels:
         self.camera_frame_queue = Queue(1)
         self.hsv_camera_frame_queue = Queue(1)
         self.webcam_frame_queue = Queue(1)
+        self.color_detection_queue = Queue(1)
         
         self.timer_value = datetime.fromtimestamp(0)-datetime.fromtimestamp(0)
         self.timer_running = False
         
-        self.phase = 1
+        self.phase = 0
 
 class InvalidUgotIP(Exception):
     pass

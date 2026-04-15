@@ -37,7 +37,7 @@ class Manager:
         if self.config["enable_gui"] == True:
             self.gui = gui.GUI(self.channels,resolution)
 
-        self.robot = robot.Robot(self.channels,ip)   
+        self.robot = robot.Robot(self.channels,ip,self.config)   
         self.timer = timer.Timer(self.channels)
         
 
