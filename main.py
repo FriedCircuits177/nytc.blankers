@@ -48,5 +48,5 @@ if __name__ == "__main__":
 
     creating Manager instance and executing mainloops...\n""")
 
-    manager = process_manager.Manager(ip="192.168.100.195")
+    manager = process_manager.Manager(ip="192.168.88.1")
     manager.mainloop()

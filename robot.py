@@ -17,7 +17,7 @@ from PIL import Image as Image2
 from pose_yolo import run_pose_control_inline
 import threading
 
-from definitions import *
+import definitions
 
 class Robot():
     def __init__(self,channels,ip='192.168.88.1',config={}):
@@ -30,7 +30,7 @@ class Robot():
             print("attempting to connect to robot at:")
             self.robot.initialize(ip)
         except:
-            raise InvalidUGOTIP(f"Failed to connect to robot at IP {ip}.\nPlease check the WiFi connection and IP shown on the bot.")
+            raise definitions.InvalidUgotIP(f"Failed to connect to robot at IP {ip}.\nPlease check the WiFi connection and IP shown on the bot.")
         
         print("\nrobot connected succesfully!")
         self.robot.load_models(
@@ -44,7 +44,8 @@ class Robot():
         self.camera_thread = threading.Thread(target=self.update_camera_frame)
         self.camera_thread.start()
 
-        self.robot.mechanical_joint_control(0,0,0,1000)
+        self.robot.mechanical_joint_control(0,30,30,1000)
+        self.robot.screen_display_background(0)
 
     def update_camera_frame(self):
         while True:
@@ -127,7 +128,7 @@ class Robot():
         
         return None
     
-    def apriltagcentre(self, distance=0.15, gap=20, fwd_spd=10, strafe_spd=10, timeout=10):
+    def apriltagcentre(self, distance=0.250, nudge = 5, gap=20, fwd_spd=15, strafe_spd=10, timeout=10):
         """
         Drive toward a detected AprilTag, keeping it centered in the camera frame.
 
@@ -138,7 +139,7 @@ class Robot():
             strafe_spd(int):   Left/right correction speed percentage (default 10 cm/s).
             timeout   (int):   Maximum seconds to search for tag (default 10s).
         """
-
+        AP_distance = 10000
         # Refresh tag data every iteration for responsive corrections.
         while True:
             AP_info = self.robot.get_apriltag_total_info()
@@ -147,10 +148,12 @@ class Robot():
                 AP_distance = AP_info[0][6]
                 tag_found = True
             except (IndexError, TypeError):
+                if AP_distance < distance:
+                    break
                 print("no tag detected")
                 time.sleep(0.1)
                 continue
-
+            print(str(AP_distance))
             if AP_x < 320 - gap:
                 # Tag is to the LEFT of center — strafe left to re-align.
                 # mecanum_move_xyz(x, y, z): x=strafe, y=forward, z=rotation
@@ -163,24 +166,30 @@ class Robot():
                 self.robot.mecanum_move_xyz(0, fwd_spd, 0)
             else:
                 # Tag is centered AND within target distance — stop and exit.
-                self.robot.mecanum_stop()
                 print("It's too close, let's stop.")
+                self.robot.mecanum_move_speed_times(0,5,nudge,1)
+                time.sleep(1)
+                self.pick_up(AP_info)
                 break
         
-        time.sleep(0.05)
-    
-    def pick_up(self):
+        
+
+    def pick_up(self,AP_info):
         """Pick up an object using the arm based on the AprilTag position."""
-        # Read the tag's current position and distance for arm targeting.
-        AP_info = self.robot.get_apriltag_total_info()
-        AP_x = AP_info[0][1]
-        AP_distance = AP_info[0][6]
+
+        while True:
+            try:
+                AP_x = AP_info[0][1]
+                AP_distance = AP_info[0][6]
+                break
+            except:
+                continue
 
         # Move arm to a neutral ready position and open the gripper.
         # joint_control(j1, j2, j3, duration_ms): j2=30, j3=30 tilts arm slightly forward.
-        self.robot.mechanical_joint_control(0, 30, 30, 1000)
+        #self.robot.mechanical_joint_control(0, 30, 30, 500)
         self.robot.mechanical_clamp_release() # Open gripper before extending arm
-        time.sleep(2) # Wait for gripper to fully open
+        time.sleep(0.5) # Wait for gripper to fully open
 
         # Calculate arm joint angles based on the tag's camera position.
         # joint1 (base): convert pixel offset from center to degrees.
@@ -198,8 +207,8 @@ class Robot():
 
         # Grasp the object and lift the arm back to the carry position.
         self.robot.mechanical_clamp_close()
-        time.sleep(2)  # Wait for gripper to fully close before lifting
-        self.robot.mechanical_joint_control(0, 30, 30, 1000)  # Return arm to neutral carry pose
+        time.sleep(0.5)  # Wait for gripper to fully close before lifting
+        self.robot.mechanical_joint_control(0, 30, 30, 500)  # Return arm to neutral carry pose
     
     def phase1(self):
         print("[robot] PHASE 1")
@@ -229,37 +238,47 @@ class Robot():
         print("green detected moving on")
         time.sleep(1)
 
-        #self.apriltagcentre()
-        #self.pick_up()
+        self.robot.mechanical_joint_control(0,0,0,500)
+        self.apriltagcentre()
         time.sleep(1)
+
+
+    def line_follow(self, mult=0.25, speed=35):
+        """Follow the detected line by turning proportionally to the line offset."""
+
+        offset, line_type, x, y = self.robot.get_single_track_total_info()
+        rotation_speed = int(offset * mult)
+        self.robot.mecanum_move_xyz(x_speed=0, y_speed=speed, z_speed=rotation_speed)
+        return line_type, x, y
+
+
 
     def phase2(self):
         print("[robot] PHASE 2")
         
         #REMEMBER TO TUNE THESE
-        BRANCH_ANGLE = 45
+        BRANCH_ANGLE = 30
+        DUMB_SECONDS = 1
         #DONE
 
-
-        line_mult=0.25
-        line_speed=50
-        offset=0
-        line_type=0
+        
         text = "I_DONT_KNOWWWWWW"
-        DUMB_SECONDS = 0
+        turned = "not yet"
+
+
+        print(f"Phase 2 following line")
+
         while True:
             if not self.channels.timer_running:
                 self.robot.mecanum_stop()
                 return
-                
-            print(f"Phase 2 following line", offset, line_type)
-            offset, line_type, _, _ = self.robot.get_single_track_total_info()
-            rotation_speed = int(offset * line_mult)
-            self.robot.mecanum_move_xyz(x_speed=0, y_speed=line_speed, z_speed=rotation_speed)
-            if line_type == 0:
-                print("NO LINE!!!!!!!!!!!")
-                self.robot.mecanum_move_speed_times(1, 30, 1, 0)
-            elif line_type == 2:
+
+            offset, line_type, x, y = self.robot.get_single_track_total_info()           
+
+            print("Info:", {offset, line_type, x, y})
+            self.line_follow(mult=0.25, speed=45)
+
+            if line_type == 2:
                 print("INTERSECTION!!!!!!!!!!!!!")
                 break
 
@@ -273,16 +292,21 @@ class Robot():
             text = self.robot.get_words_result()            
             if text == "LEFT":
                 print("LEFT FOUND")
+                turned = "LEFT"
                 self.robot.mecanum_move_speed_times(0,30,5,1)
                 self.robot.mecanum_turn_speed_times(turn=2, speed=50, times= BRANCH_ANGLE, unit = 2)
-                self.robot.mecanum_move_speed_times(1, 30, DUMB_SECONDS, 0)
+                self.robot.mecanum_move_speed_times(0, 20, DUMB_SECONDS, 0)
                 break
             elif text == "RIGHT":
                 print("RIGHT FOUND")
+                turned = "RIGHT"
                 self.robot.mecanum_move_speed_times(0,30,5,1)
                 self.robot.mecanum_turn_speed_times(turn=3, speed=50, times= BRANCH_ANGLE, unit=2)
-                self.robot.mecanum_move_speed_times(1, 30, DUMB_SECONDS, 0)            
+                self.robot.mecanum_move_speed_times(0, 20, DUMB_SECONDS, 0)            
                 break    
+            else:
+                self.robot.mecanum_move_speed_times(0,10,5,1)
+                time.sleep(0.2)
 
         loop_count = 0
 
@@ -291,23 +315,145 @@ class Robot():
                 self.robot.mecanum_stop()
                 return
                 
-            print(f"Phase 2.5 following line", offset, line_type)
-            offset, line_type, _, _ = self.robot.get_single_track_total_info()
-            rotation_speed = int(offset * line_mult)
-            self.robot.mecanum_move_xyz(x_speed=0, y_speed=line_speed, z_speed=rotation_speed)
+            print(f"Phase 2.5 following line", line_type)
+            line_type, _, _ = self.line_follow(mult=0.25, speed=30)
+
             if line_type == 0:
                 print("NO LINE!!!!!!!!!!!")
-                self.robot.mecanum_move_speed_times(0, 10, 1, 0)
+                self.robot.mecanum_move_speed_times(1, 10, 1, 0)
+
             elif line_type == 2 and loop_count > 30:
                 print("INTERSECTION!!!!!!!!!!!!!")
-                break
+                if turned == "LEFT":
+                    print("TURNING LEFT")
+                    self.robot.mecanum_move_speed_times(0,30,5,1)
+                    self.robot.mecanum_turn_speed_times(turn=2, speed=50, times= BRANCH_ANGLE, unit = 2)
+                    self.robot.mecanum_move_speed_times(0, 20, DUMB_SECONDS, 0)
+                    break
+                elif turned == "RIGHT":
+                    print("TURNING RIGHT")
+                    self.robot.mecanum_move_speed_times(0,30,5,1)
+                    self.robot.mecanum_turn_speed_times(turn=3, speed=50, times= BRANCH_ANGLE, unit=2)
+                    self.robot.mecanum_move_speed_times(0, 20, DUMB_SECONDS, 0)            
+                    break
             loop_count += 1
+
+        loop_count = 0
+        # trace = False
+        trace = True
+
+        while True:
+            if not self.channels.timer_running:
+                self.robot.mecanum_stop()
+                return
+                
+            print(f"Phase 2.8 following line", line_type)
+            line_type, _, _ = self.line_follow(mult=0.25, speed=20)
+
+            if line_type == 0:
+                if trace == True:
+                    print("ending phase 2")
+                    self.robot.mecanum_stop
+                    break        
+
+#                if trace == False:
+#                    while line_type == 0:
+#                        print("finding line")         
+#                        self.robot.mecanum_move_speed_times(0, 10, 5, 1)
+#                        offset, line_type, x, y = self.robot.get_single_track_total_info()           
+#                    trace = True
+
+
+
 
 
     def posedrive3(self):
-        print("[robot] PHASE 3 DRIVE")
+        """Phase 3: Pose-based gesture control for the robot.
+        
+        Gestures:
+        - FORWARD: both hands raised -> drive forward
+        - BACKWARD: both hands lowered -> drive backward
+        - LEFT: left hand raised -> turn left
+        - RIGHT: right hand raised -> turn right
+        - PICKUP: arms spread wide at shoulder height -> execute pickup sequence
+        - EXIT: hands close together at shoulder height -> stop and exit
+        - NONE: no valid gesture -> stop
+        
+        During startup delay period (configurable), no commands register.
+        """
+        print("[robot] PHASE 3 POSE DRIVE")
         self.robot.mecanum_stop()
+        
+        forward_speed = 30
+        backward_speed = 30
+        turn_speed = 45
+        last_command = "NONE"
+        prev_stable_command = "NONE"
+        commands_received = 0
+        
+        try:
 
+            while True:
+                # Exit if timer stops
+                if not self.channels.timer_running:
+                    self.robot.mecanum_stop()
+                    break
+                
+                command = "NONE"
+                try:
+                    command = self.channels.pose_command_queue.get(block=False)
+                except:
+                    pass
+
+                if command != last_command:
+                    commands_received += 1
+                    if command == "FORWARD":
+                        self.robot.mecanum_move_speed(0, forward_speed)
+                    elif command == "BACKWARD":
+                        self.robot.mecanum_move_speed(1, backward_speed)
+                    elif command == "LEFT":
+                        self.robot.mecanum_turn_speed(2, turn_speed)
+                    elif command == "RIGHT":
+                        self.robot.mecanum_turn_speed(3, turn_speed)
+                    elif command == "PICKUP":
+                        # Only trigger once when we *enter* the PICKUP state
+                        if prev_stable_command != "PICKUP":
+                            self._handle_pickup_sequence()
+                    elif command == "EXIT":
+                        self.robot.mecanum_stop()
+                        print("EXIT gesture detected. Exiting pose drive.")
+                        break
+                    else:
+                        self.robot.mecanum_stop()
+
+                    last_command = command
+
+                # Update previous command at the end of the loop
+                prev_stable_command = command
+                time.sleep(0.02)
+        
+        except Exception as e:
+            print(f"Error in posedrive3: {e}")
+            self.robot.mecanum_stop()
+            return
+
+    def _handle_pickup_sequence(self):
+        """Execute the pickup sequence using the mechanical arm."""
+        print("[robot] Executing pickup sequence")
+        try:
+            self.robot.mechanical_clamp_release()
+            time.sleep(0.2)
+            self.robot.mechanical_joint_control(0, 45, 45, 500)
+            time.sleep(0.5)
+            self.robot.mechanical_joint_control(0, 0, -90, 500)
+            time.sleep(0.7)
+            self.robot.mechanical_clamp_close()
+            time.sleep(0.5)
+            self.robot.mechanical_joint_control(0, 45, 45, 500)
+            time.sleep(0.5)
+            print("[robot] Pickup sequence complete")
+        except Exception as e:
+            print(f"[robot] Error in pickup sequence: {e}")
 
         
     def phase3(self):
@@ -320,8 +466,8 @@ class Robot():
         target_name = TARGET_NAME
         turn_spd = 15
         strafe_spd = 25
-        fwd_spd = 10
-        height = 80
+        fwd_spd = 5 #speed
+        height = 80 #distance
         adjust_turn = 15
         face_name = None
 
@@ -332,12 +478,12 @@ class Robot():
                 self.robot.mecanum_stop()
                 return
                 
-            print(name, face_name)
+            
             self.robot.mecanum_turn_speed(turn=3, speed=turn_spd)
 
             name = self.robot.get_words_result()
 
-
+            #print(f"{name}, {face_name}")
             # Check for any recognized faces in the frame
             faces = self.robot.get_face_recognition_total_info()
             if faces:
@@ -387,27 +533,39 @@ class Robot():
 
         clear_output(wait=True)
         self.robot.mecanum_stop()
-        self.robot.mechanical_clamp_release
+        self.robot.mechanical_clamp_release()
  
 
     
     def mainloop(self):
         while True:
+            # If timer stops, always reset to phase 0 and stop robot
+            if not self.channels.timer_running:
+                self.channels.phase = 0
+                self.robot.mecanum_stop()
+            
+            # Phase 0: Standby
             if self.channels.phase == 0:
                 self.robot.mecanum_stop()
-
-            if self.channels.phase == 0 and self.channels.timer_running:
-                self.channels.phase = 1
-            if self.channels.phase == 1:
+                if self.channels.timer_running:
+                    self.channels.phase = 1
+            
+            # Phase 1
+            elif self.channels.phase == 1:
                 self.phase1()
                 self.channels.phase = 2
+            
+            # Phase 2
             elif self.channels.phase == 2:
                 self.phase2()
                 self.channels.phase = 3
+            
+            # Phase 3
             elif self.channels.phase == 3:
                 self.posedrive3()
                 self.channels.phase = 4
-            #elif self.channels.phase == 4:
+            
+            # Phase 4
+            elif self.channels.phase == 4:
                 self.phase3()
                 self.channels.phase = 0
-            time.sleep(0.01)  # Prevent CPU spinning

@@ -28,7 +28,7 @@ from definitions import *
 
 class Manager:
 
-    def __init__(self,ip="192.168.88.1",resolution=[1280,720]):
+    def __init__(self,ip,resolution=[1280,720]):
         self.channels = QueueChannels()
 
         with open("config.json",'r') as file:
