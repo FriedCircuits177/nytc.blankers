@@ -13,9 +13,9 @@ import threading
 import os
 from datetime import datetime
 from ugot import ugot
-import pose_yolo
-importlib.reload(pose_yolo)
-from pose_yolo import run_pose_control_inline
+# import pose_yolo
+# importlib.reload(pose_yolo)
+# from pose_yolo import run_pose_control_inline
 from PIL import Image as Image2
 from ultralytics import YOLO
 
@@ -37,8 +37,8 @@ class PoseDetector:
         self.model = YOLO(model_path)
         
         # Gesture classification thresholds
-        self.up_margin_factor = 0.1
-        self.down_margin_factor = 0.1
+        self.up_margin_factor = 0.2
+        self.down_margin_factor = 0.2
         self.min_conf = 0.3
         
         # Debouncing
@@ -248,12 +248,16 @@ class PoseDetector:
 
 class GUI():
     def __init__(self,channels,resolution=[1280,720]):
+        
         self.channels = channels
         self.resolution = resolution
+        
         #ensure window is centered
         os.environ['SDL_VIDEO_CENTERED'] = '1'
 
         pygame.init()
+        pygame.mixer.init()
+
         self.screen = pygame.display.set_mode(resolution)
         self.clock = pygame.time.Clock()
         self.botcamframe = pygame.Surface(resolution)
@@ -289,6 +293,10 @@ class GUI():
             image_red = np.transpose(image_red, (1, 0, 2))
             red_surface = pygame.surfarray.make_surface(image_red)
             self.phase_images_red.append(red_surface)
+            
+        self.tone = pygame.mixer.Sound("assets/tone.wav")
+        self.tone2 = pygame.mixer.Sound("assets/tone2.wav")
+        self.tone3 = pygame.mixer.Sound("assets/tone3.wav")
         
         # Initialize pose detector
         self.pose_detector = PoseDetector(self.channels)
@@ -303,6 +311,7 @@ class GUI():
             # Pygame's make_surface is very fast if the array is already 
             # (width, height, 3). 
             self.botcamframe = pygame.surfarray.make_surface(frame)
+            #self.botcamframe = pygame.transform.scale(self.botcamframe,(640,480))
     
     def convert_webcam_frame(self):
         # Non-blocking frame read: only process if a frame is ready in buffer
@@ -369,9 +378,23 @@ class GUI():
                         # Stop the timer and robot
                         self.channels.timer_running = False
                         self.channels.phase = 0
+                        self.channels.initialise()
+                        
                     else:
                         # Start the timer
                         self.channels.timer_running = True
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_SPACE or event.key == pygame.K_RETURN:
+                        if self.channels.timer_running:
+                        # Stop the timer and robot
+                            self.channels.timer_running = False
+                            self.channels.phase = 0
+                            self.channels.initialise()
+                            self.robot.subinit()
+                    else:
+                        # Start the timer
+                        self.channels.timer_running = True
+
                 
             
             self.convert_bot_camera_frame()  # Update cached frame if new one available
@@ -386,6 +409,7 @@ class GUI():
             
             # Show pose detection visualization during phase 3, otherwise regular webcam
             if self.channels.phase == 3:
+                self.pose_frame_display = pygame.transform.scale(self.pose_frame_display,(640,480))
                 self.screen.blit(self.pose_frame_display, (640, 0))
                 # Draw "POSE DETECTION" label
                 pose_label = self.render_text("POSE DETECTION", size=18, colour=(0, 255, 0))
@@ -416,6 +440,15 @@ class GUI():
             
             # Update display
             pygame.display.flip()
+
+            if not self.channels.sound_queue.empty() and not pygame.mixer.get_busy():
+                a = self.channels.sound_queue.get(block=False)
+                if a == 0:
+                    self.tone.play()
+                elif a == 1:
+                    self.tone2.play()
+                elif a == 2:
+                    self.tone3.play()
             self.clock.tick(30)  # 30 FPS
         
         self.webcam.release()

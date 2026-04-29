@@ -12,27 +12,33 @@ import importlib
 import cv2
 import numpy as np
 from ugot import ugot
-import pose_yolo
-importlib.reload(pose_yolo)
-from pose_yolo import run_pose_control_inline
+# import pose_yolo
+# importlib.reload(pose_yolo)
+# from pose_yolo import run_pose_control_inline
 #from IPython.display import display, clear_output, Image
 from PIL import Image as Image2
-from pose_yolo import run_pose_control_inline
 import threading
 from queue import Queue
 
 class QueueChannels:
     def __init__(self):
+        self.timer_value = datetime.fromtimestamp(0)-datetime.fromtimestamp(0)
+        self.sound_queue = Queue(10)
+        self.initialise()
+        
+    def initialise(self):
         self.camera_frame_queue = Queue(1)
         self.hsv_camera_frame_queue = Queue(1)
         self.webcam_frame_queue = Queue(1)
         self.color_detection_queue = Queue(1)
-        self.pose_command_queue = Queue(10)
+        self.pose_command_queue = Queue(1)
         
-        self.timer_value = datetime.fromtimestamp(0)-datetime.fromtimestamp(0)
+        
+        
         self.timer_running = False
         
         self.phase = 0
+        self.start_phase = 1 #phase to start in
         self.pose_detection_active = False
 
 class InvalidUgotIP(Exception):

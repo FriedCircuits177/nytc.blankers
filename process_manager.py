@@ -12,16 +12,15 @@ import importlib
 import cv2
 import numpy as np
 from ugot import ugot
-import pose_yolo
-importlib.reload(pose_yolo)
-from pose_yolo import run_pose_control_inline
+# import pose_yolo
+# importlib.reload(pose_yolo)
+# from pose_yolo import run_pose_control_inline
 #from IPython.display import display, clear_output, Image
 from PIL import Image as Image2
-from pose_yolo import run_pose_control_inline
 import threading
 from queue import Queue
 import json
-
+import os
 #other modules
 import robot,gui,timer
 from definitions import *
@@ -56,6 +55,10 @@ class Manager:
                     pass
                 except KeyboardInterrupt:
                     break
+        
+        print("stopped gui closed bye")
+        self.robot.robot.mecanum_stop()
+        os._exit(0)
             
 
         

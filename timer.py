@@ -13,9 +13,9 @@ import threading
 import os
 from datetime import datetime
 from ugot import ugot
-import pose_yolo
-importlib.reload(pose_yolo)
-from pose_yolo import run_pose_control_inline
+# import pose_yolo
+# importlib.reload(pose_yolo)
+# from pose_yolo import run_pose_control_inline
 from PIL import Image as Image2
 
 class Timer():
