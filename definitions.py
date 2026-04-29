@@ -38,7 +38,7 @@ class QueueChannels:
         self.timer_running = False
         
         self.phase = 0
-        self.start_phase = 1 #phase to start in
+        self.start_phase = 4 #phase to start in
         self.pose_detection_active = False
 
 class InvalidUgotIP(Exception):

@@ -46,11 +46,14 @@ class Robot():
 
         self.robot.mechanical_joint_control(0,30,30,1000)
         self.robot.screen_display_background(0)
+        self.robot.mechanical_clamp_close()
+
     def subinit(self):
         self.robot.mecanum_stop()
         self.robot.set_track_recognition_line(0)
         self.robot.screen_display_background(0)
         self.robot.mechanical_joint_control(0,30,30,1000)
+        
         self.robot.screen_display_background(0)
 
     def line_follow(self, mult=0.25, speed=35):
@@ -411,7 +414,7 @@ class Robot():
             
             print(f"pose driving,", {command}, {last_command})
 
-
+            
             # if command == last_command and command == "NONE":
             #     self.robot.mecanum_stop()
 
@@ -423,9 +426,9 @@ class Robot():
                 elif command == "BACKWARD":
                     self.robot.mecanum_move_speed_times(1, backward_speed, times=5, unit=1)
                 elif command == "LEFT":
-                    self.robot.mecanum_turn_speed_times(2, turn_speed,times=5, unit=1)
+                    self.robot.mecanum_turn_speed_times(turn=2, speed=turn_speed, times=30, unit=2)
                 elif command == "RIGHT":
-                    self.robot.mecanum_turn_speed_times(3, turn_speed,times=5, unit=1)
+                    self.robot.mecanum_turn_speed_times(turn=3, speed=turn_speed, times=30, unit=2)
                 elif command == "EXIT" and commands_received > 3:
                     self.robot.mecanum_stop()
                     print("EXIT gesture detected. Exiting pose drive.")
@@ -441,107 +444,14 @@ class Robot():
 #            return
     
     def driveanddrop(self,distance=15,speed=60):
-        self.robot.mecanum_move_speed_times(0,speed,distance,1)
-        self.robot.mechanical_joint_control(0,-10,-10,500)
-        self.robot.mechanical_clamp_release()
-        
-    def phase3(self):
-        print("[robot] PHASE 3, FACE RECOGNITION")
-        #REMEMBER MEEEEE
-        TARGET_NAME = "Ryan"
-        gap = 10        
-        #DONE
-        target_name = TARGET_NAME
-        turn_spd = 30
-        strafe_spd = 25
-        fwd_spd = 5 #speed
-        height = 40 #distance
-        adjust_turn = 15
-        face_name = None
-
-        X_TOLERANCE_ON_FIRST = 100
-
-        print("p3p1")
-
-        while True:
-            if not self.channels.timer_running:
-                self.robot.mecanum_stop()
-                return
-                
-            
-            self.robot.mecanum_turn_speed(turn=3, speed=turn_spd)
-
-            name = self.robot.get_words_result()
-
-            print(f"{name}, {face_name}")
-            # Check for any recognized faces in the frame
-            faces = self.robot.get_face_recognition_total_info()
-            if faces:
-                face_name = faces[0][0]  # We need to calibrate all the face first
-                if face_name != TARGET_NAME:
-                    while not (faces[0][1] < (640/2)+X_TOLERANCE_ON_FIRST and faces[0][1] > (640/2)-X_TOLERANCE_ON_FIRST):
-                        self.robot.mecanum_turn_speed_times(turn=3, speed=turn_spd,times=90 , unit=2)
-                    break
-                elif face_name == TARGET_NAME:
-                    self.driveanddrop()
-
-        while True:     
-            faces = self.robot.get_face_recognition_total_info()
-            name = self.robot.get_words_result()
-            if name == target_name or face_name == target_name:
-                self.robot.mecanum_stop()
-                print(f"Saw {target_name}!")
-
-                # Small corrective turn to center the robot on the target
-                self.robot.mecanum_turn_speed_times(turn=3, speed=20, times=adjust_turn, unit=2)
-                break  
-
-        print("p3p2")
-
-        face_counter = 0
-
-        while True:
-            if not self.channels.timer_running:
-                self.robot.mecanum_stop()
-                return
-                
-            name = self.robot.get_words_result()
-            faces = self.robot.get_face_recognition_total_info()
-
-            if not faces:
-                # Lost the face; inch forward slowly to try to find it again
-                self.robot.mecanum_translate_speed(angle=0, speed=fwd_spd)
-                face_counter += 1
-                if face_counter > 20:
-                    break
-            else:
-                c_x = faces[0][1]  # Horizontal center of the face in the frame (0–640 px)
-                h = faces[0][3]  # Height of the face bounding box (proxy for distance)
-                if h < height:
-                    if c_x < 320 - gap:
-                        # Face is too far LEFT — strafe left while moving forward
-                        self.robot.mecanum_move_xyz(
-                            x_speed=-strafe_spd, y_speed=fwd_spd, z_speed=0
-                        )
-                    elif c_x > 320 + gap:
-                        # Face is too far RIGHT — strafe right while moving forward
-                        self.robot.mecanum_move_xyz(x_speed=strafe_spd, y_speed=fwd_spd, z_speed=0)
-                    else:
-                        # Face is centered but still small (far away) — move straight forward
-                        self.robot.mecanum_move_xyz(x_speed=0, y_speed=fwd_spd, z_speed=0)
-                else:
-                   # Face is centered AND large enough — we've arrived!
-                   self.robot.mecanum_stop()
-                   print(f"Reached {target_name}!")
-                   break  # Done
-            print(f"alignment:", {c_x}, {h})
-
-        clear_output(wait=True)
         self.robot.mecanum_stop()
+        self.robot.mecanum_move_speed_times(0,speed,distance,1)
+        self.robot.mechanical_joint_control(0,-20,-70,500)
         self.robot.mechanical_clamp_release()
-    # def phase3legacy(self):
+        exit()
+        
+    # def phase3(self):
     #     print("[robot] PHASE 3, FACE RECOGNITION")
-
     #     #REMEMBER MEEEEE
     #     TARGET_NAME = "Ryan"
     #     gap = 10        
@@ -553,6 +463,8 @@ class Robot():
     #     height = 40 #distance
     #     adjust_turn = 15
     #     face_name = None
+
+    #     X_TOLERANCE_ON_FIRST = 100
 
     #     print("p3p1")
 
@@ -566,13 +478,21 @@ class Robot():
 
     #         name = self.robot.get_words_result()
 
-    #         #print(f"{name}, {face_name}")
+    #         print(f"{name}, {face_name}")
     #         # Check for any recognized faces in the frame
     #         faces = self.robot.get_face_recognition_total_info()
     #         if faces:
     #             face_name = faces[0][0]  # We need to calibrate all the face first
+    #             if face_name != TARGET_NAME:
+    #                 while not (faces[0][1] < (640/2)+X_TOLERANCE_ON_FIRST and faces[0][1] > (640/2)-X_TOLERANCE_ON_FIRST):
+    #                     self.robot.mecanum_turn_speed_(turn=3, speed=turn_spd)
+    #                 break
+    #             elif face_name == TARGET_NAME:
+    #                 self.driveanddrop()
 
-
+    #     while True:     
+    #         faces = self.robot.get_face_recognition_total_info()
+    #         name = self.robot.get_words_result()
     #         if name == target_name or face_name == target_name:
     #             self.robot.mecanum_stop()
     #             print(f"Saw {target_name}!")
@@ -624,6 +544,56 @@ class Robot():
     #     clear_output(wait=True)
     #     self.robot.mecanum_stop()
     #     self.robot.mechanical_clamp_release()
+    def phase3(self):
+        print("[robot] PHASE 3, FACE RECOGNITION")
+
+        #REMEMBER MEEEEE
+        TARGET_NAME = "Ryan"
+        # TARGET_NAME = "Ananya"
+        # TARGET_NAME = "Coley"
+        # TARGET_NAME = "Arjun"
+        gap = 10        
+        #DONE
+        target_name = TARGET_NAME
+        turn_spd = 30
+        strafe_spd = 25
+        fwd_spd = 5 #speed
+        height = 40 #distance
+        adjust_turn = 15
+        face_name = None
+
+        print("p3p1")
+
+        while True:
+            if not self.channels.timer_running:
+                self.robot.mecanum_stop()
+                return
+
+            name = self.robot.get_words_result()
+
+            #print(f"{name}, {face_name}")
+            # Check for any recognized faces in the frame
+            faces = self.robot.get_face_recognition_total_info()
+            if faces:
+                face_name = faces[0][0]  # We need to calibrate all the face first
+
+
+            if name == target_name or face_name == target_name:
+                self.robot.mecanum_stop()
+                print(f"Saw {target_name}!")
+
+                # Small corrective turn to center the robot on the target
+                self.robot.mecanum_turn_speed_times(turn=3, speed=10, times=10, unit=2)
+                break
+
+            if name == "Ryan" or name == "Coley" or name == "Arjun" or name == "Ananya":
+                self.robot.mecanum_turn_speed_times(turn=3, speed=80, times=50, unit=2)
+
+            self.robot.mecanum_turn_speed_times(turn=3, speed=20, times=10, unit=2)
+
+
+
+        self.driveanddrop()
  
 
     
